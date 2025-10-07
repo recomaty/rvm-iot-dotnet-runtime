@@ -1,0 +1,209 @@
+name: Build and Deploy Multi-Architecture Container
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: r3polska/rvm-iot-dotnet-runtime
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Extract platform for tags
+      id: platform
+      run: |
+        platform="${{ matrix.platform }}"
+        echo "clean=${platform//\//-}" >> $GITHUB_OUTPUT
+
+    - name: Build test image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        load: true
+        tags: test-image:${{ steps.platform.outputs.clean }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Create test .NET application
+      run: |
+        mkdir -p test-app
+        cd test-app
+        cat > Program.cs << 'EOF'
+        using System;
+        
+        Console.WriteLine("Hello from .NET 9!");
+        Console.WriteLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}");
+        Console.WriteLine($"Framework: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+        Console.WriteLine($"OS: {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        Console.WriteLine("Test application completed successfully!");
+        EOF
+        
+        cat > test-app.csproj << 'EOF'
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net9.0</TargetFramework>
+            <RootNamespace>test_app</RootNamespace>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        EOF
+
+    - name: Build .NET application
+      run: |
+        # Use the official .NET SDK to build the application
+        docker run --rm \
+          -v $(pwd)/test-app:/src \
+          -w /src \
+          mcr.microsoft.com/dotnet/sdk:9.0 \
+          dotnet publish -c Release -o /src/publish
+
+    - name: Test .NET application in container
+      run: |
+        # Copy the published app to a temporary directory
+        mkdir -p temp-test
+        cp -r test-app/publish/* temp-test/
+        
+        # Test if the .NET application runs successfully
+        docker run --rm \
+          -v $(pwd)/temp-test:/test-app \
+          -w /test-app \
+          test-image:${{ steps.platform.outputs.clean }} \
+          dotnet test-app.dll
+
+    - name: Create test HTML file
+      run: |
+        mkdir -p html-test
+        cat > html-test/test.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Test Document</title>
+        </head>
+        <body>
+            <h1>PDF Generation Test</h1>
+            <p>This is a test document to verify htmldoc functionality.</p>
+            <p>Platform: ${{ matrix.platform }}</p>
+            <p>Generated on: $(date)</p>
+        </body>
+        </html>
+        EOF
+
+    - name: Test htmldoc functionality
+      run: |
+        # Test htmldoc PDF generation
+        docker run --rm \
+          -v $(pwd)/html-test:/html-test \
+          test-image:${{ steps.platform.outputs.clean }} \
+          htmldoc --webpage -f /html-test/output.pdf /html-test/test.html
+        
+        # Verify PDF was created
+        docker run --rm \
+          -v $(pwd)/html-test:/html-test \
+          test-image:${{ steps.platform.outputs.clean }} \
+          sh -c "ls -la /html-test/output.pdf && echo 'PDF generation successful!'"
+
+    - name: Test CUPS client functionality
+      run: |
+        # Test if CUPS commands are available and executable
+        echo "Testing lpstat command..."
+        docker run --rm \
+          test-image:${{ steps.platform.outputs.clean }} \
+          lpstat --help
+        
+        echo "Testing lp command..."
+        docker run --rm \
+          test-image:${{ steps.platform.outputs.clean }} \
+          lp --help
+        
+        echo "Testing lpq command..."
+        docker run --rm \
+          test-image:${{ steps.platform.outputs.clean }} \
+          lpq --help
+        
+        echo "CUPS client commands are working!"
+
+    - name: Test additional installed packages
+      run: |
+        echo "Testing imagemagick..."
+        docker run --rm \
+          test-image:${{ steps.platform.outputs.clean }} \
+          convert --version
+        
+        echo "Testing poppler-utils..."
+        docker run --rm \
+          test-image:${{ steps.platform.outputs.clean }} \
+          pdfinfo -v
+        
+        echo "All additional packages are working!"
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push by platform
+      if: github.event_name != 'pull_request'
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        push: true
+        tags: ${{ env.IMAGE_NAME }}:latest-${{ steps.platform.outputs.clean }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  merge-and-push:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+    
+    steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Create and push multi-arch manifest
+      run: |
+        # Create and push multi-architecture manifest
+        docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
+          ${{ env.IMAGE_NAME }}:latest-linux-amd64 \
+          ${{ env.IMAGE_NAME }}:latest-linux-arm64
+        
+        echo "Multi-architecture image pushed successfully!"
+        
+        # Inspect the manifest to verify
+        docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
