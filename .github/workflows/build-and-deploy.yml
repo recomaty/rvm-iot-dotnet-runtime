@@ -13,28 +13,24 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-    
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm64
+            arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
-    - name: Extract platform for tags
-      id: platform
-      run: |
-        platform="${{ matrix.platform }}"
-        echo "clean=${platform//\//-}" >> $GITHUB_OUTPUT
 
     - name: Build test image
       uses: docker/build-push-action@v5
@@ -42,24 +38,22 @@ jobs:
         context: .
         platforms: ${{ matrix.platform }}
         load: true
-        tags: test-image:${{ steps.platform.outputs.clean }}
+        tags: test-image:${{ matrix.arch }}
         cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Create test .NET application
+        cache-to: type=gha,mode=max    - name: Create test .NET application
       run: |
         mkdir -p test-app
         cd test-app
         cat > Program.cs << 'EOF'
         using System;
-        
+
         Console.WriteLine("Hello from .NET 9!");
         Console.WriteLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}");
         Console.WriteLine($"Framework: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
         Console.WriteLine($"OS: {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
         Console.WriteLine("Test application completed successfully!");
         EOF
-        
+
         cat > test-app.csproj << 'EOF'
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -86,12 +80,12 @@ jobs:
         # Copy the published app to a temporary directory
         mkdir -p temp-test
         cp -r test-app/publish/* temp-test/
-        
+
         # Test if the .NET application runs successfully
         docker run --rm \
           -v $(pwd)/temp-test:/test-app \
           -w /test-app \
-          test-image:${{ steps.platform.outputs.clean }} \
+          test-image:${{ matrix.arch }} \
           dotnet test-app.dll
 
     - name: Create test HTML file
@@ -117,47 +111,45 @@ jobs:
         # Test htmldoc PDF generation
         docker run --rm \
           -v $(pwd)/html-test:/html-test \
-          test-image:${{ steps.platform.outputs.clean }} \
+          test-image:${{ matrix.arch }} \
           htmldoc --webpage -f /html-test/output.pdf /html-test/test.html
-        
+
         # Verify PDF was created
         docker run --rm \
           -v $(pwd)/html-test:/html-test \
-          test-image:${{ steps.platform.outputs.clean }} \
+          test-image:${{ matrix.arch }} \
           sh -c "ls -la /html-test/output.pdf && echo 'PDF generation successful!'"
 
     - name: Test CUPS client functionality
       run: |
-        # Test if CUPS commands are available and executable
+        # Test if CUPS commands are available and return expected help text
         echo "Testing lpstat command..."
         docker run --rm \
-          test-image:${{ steps.platform.outputs.clean }} \
-          lpstat --help
-        
+          test-image:${{ matrix.arch }} \
+          sh -c "lpstat --help 2>&1 | grep -q 'Usage: lpstat' && echo 'lpstat help found'"
+
         echo "Testing lp command..."
         docker run --rm \
-          test-image:${{ steps.platform.outputs.clean }} \
-          lp --help
-        
+          test-image:${{ matrix.arch }} \
+          sh -c "lp --help 2>&1 | grep -q 'Usage: lp' && echo 'lp help found'"
+
         echo "Testing lpq command..."
         docker run --rm \
-          test-image:${{ steps.platform.outputs.clean }} \
-          lpq --help
-        
-        echo "CUPS client commands are working!"
+          test-image:${{ matrix.arch }} \
+          sh -c "lpq --help 2>&1 | grep -q 'Usage: lpq' && echo 'lpq help found'"
 
-    - name: Test additional installed packages
+        echo "CUPS client commands are working!"    - name: Test additional installed packages
       run: |
         echo "Testing imagemagick..."
         docker run --rm \
-          test-image:${{ steps.platform.outputs.clean }} \
+          test-image:${{ matrix.arch }} \
           convert --version
-        
+
         echo "Testing poppler-utils..."
         docker run --rm \
-          test-image:${{ steps.platform.outputs.clean }} \
+          test-image:${{ matrix.arch }} \
           pdfinfo -v
-        
+
         echo "All additional packages are working!"
 
     - name: Log in to Docker Hub
@@ -176,7 +168,7 @@ jobs:
         context: .
         platforms: ${{ matrix.platform }}
         push: true
-        tags: ${{ env.IMAGE_NAME }}:latest-${{ steps.platform.outputs.clean }}
+        tags: ${{ env.IMAGE_NAME }}:latest-${{ matrix.arch }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -184,7 +176,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-test
     if: github.event_name != 'pull_request'
-    
+
     steps:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -200,10 +192,10 @@ jobs:
       run: |
         # Create and push multi-architecture manifest
         docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
-          ${{ env.IMAGE_NAME }}:latest-linux-amd64 \
-          ${{ env.IMAGE_NAME }}:latest-linux-arm64
-        
+          ${{ env.IMAGE_NAME }}:latest-amd64 \
+          ${{ env.IMAGE_NAME }}:latest-arm64
+
         echo "Multi-architecture image pushed successfully!"
-        
+
         # Inspect the manifest to verify
         docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
