@@ -40,7 +40,8 @@ jobs:
         load: true
         tags: test-image:${{ matrix.arch }}
         cache-from: type=gha
-        cache-to: type=gha,mode=max    - name: Create test .NET application
+        cache-to: type=gha,mode=max
+    - name: Create test .NET application
       run: |
         mkdir -p test-app
         cd test-app
