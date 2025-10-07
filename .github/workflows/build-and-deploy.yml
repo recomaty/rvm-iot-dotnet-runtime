@@ -140,6 +140,8 @@ jobs:
           sh -c "lpq --help 2>&1 | grep -q 'Usage: lpq' && echo 'lpq help found'"
 
         echo "CUPS client commands are working!"    - name: Test additional installed packages
+
+    - name: Test additional installed packages
       run: |
         echo "Testing imagemagick..."
         docker run --rm \
