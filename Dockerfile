@@ -1,5 +1,5 @@
 # Use the latest .NET 9 runtime on Debian
-FROM mcr.microsoft.com/dotnet/runtime:9.0-bookworm-slim
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
 
 # Install required packages
 RUN apt-get update && apt-get install -y \
