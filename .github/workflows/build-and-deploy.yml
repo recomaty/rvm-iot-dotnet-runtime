@@ -36,7 +36,6 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: ${{ matrix.platform }}
         load: true
         tags: test-image:${{ matrix.arch }}
         cache-from: type=gha
@@ -169,9 +168,8 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: ${{ matrix.platform }}
         push: true
-        tags: ${{ env.IMAGE_NAME }}:latest/${{ matrix.arch }}
+        tags: ${{ env.IMAGE_NAME }}:latest-${{ matrix.arch }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -195,8 +193,8 @@ jobs:
       run: |
         # Create and push multi-architecture manifest
         docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
-          ${{ env.IMAGE_NAME }}:latest/amd64 \
-          ${{ env.IMAGE_NAME }}:latest/arm64
+          ${{ env.IMAGE_NAME }}:latest-amd64 \
+          ${{ env.IMAGE_NAME }}:latest-arm64
 
         echo "Multi-architecture image pushed successfully!"
 
