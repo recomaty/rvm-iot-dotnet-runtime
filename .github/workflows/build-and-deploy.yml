@@ -195,8 +195,8 @@ jobs:
       run: |
         # Create and push multi-architecture manifest
         docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
-          ${{ env.IMAGE_NAME }}:latest-amd64 \
-          ${{ env.IMAGE_NAME }}:latest-arm64
+          ${{ env.IMAGE_NAME }}:latest/amd64 \
+          ${{ env.IMAGE_NAME }}:latest/arm64
 
         echo "Multi-architecture image pushed successfully!"
 
