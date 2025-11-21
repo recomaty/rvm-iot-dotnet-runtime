@@ -12,11 +12,16 @@ RUN apt-get update && apt-get install -y \
     libc6-dev \
     cups-bsd \
     htmldoc \
+    libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set timezone to Europe/Warsaw
 ENV TZ=Europe/Warsaw
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+#required for libusb mono 
+RUN ln -s /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0 /usr/lib/libusb-1.0.so && \
+    ldconfig
 
 # Set the working directory
 WORKDIR /app
