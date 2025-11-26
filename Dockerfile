@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     cups-bsd \
     htmldoc \
     libusb-1.0-0 \
+    usbutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Set timezone to Europe/Warsaw
